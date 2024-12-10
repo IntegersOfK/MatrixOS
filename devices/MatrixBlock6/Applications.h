@@ -14,6 +14,8 @@
 // #include "applications/Example/Example.h"
 #include "applications/Reversi/Reversi.h"
 #include "applications/PolyPlayground/PolyPlayground.h"
+#include "applications/WebExample/WebExample.h"
+
 
 // BOOT ANIMATION
 #include "applications/Mystrix/MystrixBoot/MystrixBoot.h"
