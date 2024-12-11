@@ -29,13 +29,13 @@ Midi signal received will be echoed back to the host
 
 #include "esp_http_client.h"
 
-#define WEB_EXAMPLE_WIFI_SSID      "YOUR_WIFI_SSID"
-#define WEB_EXAMPLE_WIFI_PASS      "YOUR_WIFI_PASSWORD"
+#define WEB_EXAMPLE_WIFI_SSID "AAA"
+#define WEB_EXAMPLE_WIFI_PASS "15elephants"
 #define WEB_EXAMPLE_MAXIMUM_RETRY  3
 #define WEB_EXAMPLE_SCAN_LIST_SIZE 16
 
-#define WEB_SERVER "webhook.site"
-#define WEB_PATH "/85ebeaa5-d4e8-40e9-92be-4dd07224f497"
+#define WEB_SERVER "192.168.1.18:8123"
+#define WEB_PATH "/api/webhook/rgb_webhook"
 
 /* The event group allows multiple bits for each event, but we only care about two events:
  * - we are connected to the AP with an IP

@@ -1,5 +1,6 @@
 #include "WebExample.h"
 #include "ui/UI.h"  // Include the UI Framework
+#include "ui/UIUtilities.h"
 
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
@@ -34,7 +35,7 @@ void WebExample::UIMenu() {
   colorSelector.SetColorFunc([&]() -> Color { return color; });  // Use the color variable as the color of this UI element
   colorSelector.SetSize(Dimension(8, 1));                             // Size of the UI element (2x1)
   colorSelector.OnPress([&]() -> void {                          // Callback function when the button is pressed
-    MatrixOS::UIInterface::ColorPicker(color);  // References to the color variable. The color variable will be updated by the ColorPicker function. Return true if color is
+    MatrixOS::UIUtility::ColorPicker(color);  // References to the color variable. The color variable will be updated by the ColorPicker function. Return true if color is
                                                 // changed, false if not.
     char json_data[64];
     sprintf(json_data, "{\"color\":%lu}", color.RGB());
@@ -50,11 +51,11 @@ void WebExample::UIMenu() {
   wifiConnected.OnHold([&]() -> void {
     if (is_connected)
     {
-      MatrixOS::UIInterface::TextScroll("Wifi is connected", Color(0x00FF00));
+      MatrixOS::UIUtility::TextScroll("Wifi is connected", Color(0x00FF00));
     }
     else
     {
-      MatrixOS::UIInterface::TextScroll("Wifi is not connected", Color(0xFF0000));
+      MatrixOS::UIUtility::TextScroll("Wifi is not connected", Color(0xFF0000));
     }
   });
 
