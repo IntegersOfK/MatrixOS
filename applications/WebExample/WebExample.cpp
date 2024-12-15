@@ -8,6 +8,15 @@ static uint8_t s_retry_num = 0;
 // THIS IS BAD! We are defining a global variable in app file. This is bad practice.
 /// This means this mem is wasted regardless of the application is running or not.
 
+static std::vector<Color> colors{Color(0xFF0000), Color(0xFF1800), Color(0xFF3000), Color(0xFF4800), Color(0xFF6000), Color(0xFF7800), Color(0xFF8F00), Color(0xFFA700),
+                                 Color(0xFFBF00), Color(0xFFD700), Color(0xFFEF00), Color(0xF7FF00), Color(0xDFFF00), Color(0xC7FF00), Color(0xAFFF00), Color(0x97FF00),
+                                 Color(0x80FF00), Color(0x68FF00), Color(0x50FF00), Color(0x38FF00), Color(0x20FF00), Color(0x08FF00), Color(0x00FF10), Color(0x00FF28),
+                                 Color(0x00FF40), Color(0x00FF58), Color(0x00FF70), Color(0x00FF87), Color(0x00FF9F), Color(0x00FFB7), Color(0x00FFCF), Color(0x00FFE7),
+                                 Color(0x00FFFF), Color(0x00E7FF), Color(0x00CFFF), Color(0x00B7FF), Color(0x009FFF), Color(0x0087FF), Color(0x0070FF), Color(0x0058FF),
+                                 Color(0x0040FF), Color(0x0028FF), Color(0x0010FF), Color(0x0800FF), Color(0x2000FF), Color(0x3800FF), Color(0x5000FF), Color(0x6800FF),
+                                 Color(0x8000FF), Color(0x9700FF), Color(0xAF00FF), Color(0xC700FF), Color(0xDF00FF), Color(0xF700FF), Color(0xFF00EF), Color(0xFF00D7),
+                                 Color(0xFF00BF), Color(0xFF00A7), Color(0xFF008F), Color(0xFF0078), Color(0xFF0060), Color(0xFF0048), Color(0xFF0030), Color(0xFF0018)};
+
 // Run once
 void WebExample::Setup() {
   MLOGI("Example", "Example Started");
@@ -29,37 +38,30 @@ void WebExample::UIMenu() {
   // UI Name, Color (as the text scroll color). and new led layer (Set as true, the UI will render on a new led layer. Persevere what was rendered before after UI exits)
   UI menu("UI Menu", Color(0x00FFFF), true);
 
-  // Create an dynamic colored button
-  UIButton colorSelector;
-  colorSelector.SetName("Color Selector");                       // Name of this UI element
-  colorSelector.SetColorFunc([&]() -> Color { return color; });  // Use the color variable as the color of this UI element
-  colorSelector.SetSize(Dimension(8, 1));                             // Size of the UI element (2x1)
-  colorSelector.OnPress([&]() -> void {                          // Callback function when the button is pressed
-    MatrixOS::UIUtility::ColorPicker(color);  // References to the color variable. The color variable will be updated by the ColorPicker function. Return true if color is
-                                                // changed, false if not.
-    char json_data[64];
-    sprintf(json_data, "{\"color\":%lu}", color.RGB());
-    send_post_request(json_data);
-  });
+  // I can't get the buttons to be added to menu.AddUIComponent without initalizing them all first for some reason.
+  std::vector<UIButton> buttons;
+  buttons.reserve(64);
+  for (int i = 0; i < 64; ++i)
+  {
+    buttons.emplace_back();  // Add a new UIButton to the vector
+  }
 
-  // Add the UI element to the UI object to top right conner
-  menu.AddUIComponent(colorSelector, Point(0, Device::y_size - 1));
+  for (size_t i = 0; i < colors.size(); ++i)
+  {
+    // Set the color function for the button
+    buttons[i].SetColor(colors[i]);
 
-  UIButton wifiConnected;
-  wifiConnected.SetName("Wifi status");
-  wifiConnected.SetColorFunc([&]() -> Color { return is_connected ? Color(0x00FF00) : Color(0xFF0000); });
-  wifiConnected.OnHold([&]() -> void {
-    if (is_connected)
-    {
-      MatrixOS::UIUtility::TextScroll("Wifi is connected", Color(0x00FF00));
-    }
-    else
-    {
-      MatrixOS::UIUtility::TextScroll("Wifi is not connected", Color(0xFF0000));
-    }
-  });
+    // Set the OnPress event for the button
+    buttons[i].OnPress([this, color = colors[i]]() -> void {
+      char json_data[64];
+      sprintf(json_data, "{\"r\":%u,\"g\":%u,\"b\":%u}", color.R, color.G, color.B);
+      send_post_request(json_data);
+    });
 
-    menu.AddUIComponent(wifiConnected, Point(0, 0));
+    // Add the button to the menu at position (i / 8, i % 8)
+    buttons[i].SetSize(Dimension(1, 1));
+    menu.AddUIComponent(buttons[i], Point(i / 8, i % 8));
+  }
 
   // Set a key event handler for the UI object
   // By default, the UI exits after the function key is PRESSED.
@@ -214,6 +216,7 @@ void WebExample::send_post_request(const char* post_data) {
   };
 
   esp_http_client_handle_t client = esp_http_client_init(&config);
+  esp_http_client_set_header(client, "Content-Type", "application/json");
 
   // Set request method and payload
   esp_http_client_set_method(client, HTTP_METHOD_POST);
