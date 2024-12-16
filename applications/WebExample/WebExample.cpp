@@ -1,4 +1,6 @@
 #include "WebExample.h"
+#include <cmath>
+#include "MatrixOS.h"
 #include "ui/UI.h"  // Include the UI Framework
 #include "ui/UIUtilities.h"
 
@@ -16,6 +18,25 @@ static std::vector<Color> colors{Color(0xFF0000), Color(0xFF1800), Color(0xFF300
                                  Color(0x0040FF), Color(0x0028FF), Color(0x0010FF), Color(0x0800FF), Color(0x2000FF), Color(0x3800FF), Color(0x5000FF), Color(0x6800FF),
                                  Color(0x8000FF), Color(0x9700FF), Color(0xAF00FF), Color(0xC700FF), Color(0xDF00FF), Color(0xF700FF), Color(0xFF00EF), Color(0xFF00D7),
                                  Color(0xFF00BF), Color(0xFF00A7), Color(0xFF008F), Color(0xFF0078), Color(0xFF0060), Color(0xFF0048), Color(0xFF0030), Color(0xFF0018)};
+
+float constrain(float amt, float low, float high) {
+  return (amt < low) ? low : (amt > high) ? high : amt;
+}
+
+Color new_saturation_by_factor(Color col, float factor) {
+  float ampfactor = factor / 2.0; // increase the amplification for more diverse saturations
+  
+  // Calculate the grayscale equivalent of the color
+  uint8_t gray = (col.R * 0.299 + col.G * 0.587 + col.B * 0.114);  // Standard grayscale conversion
+
+  // Blend the color components with the grayscale based on the factor
+  uint8_t newR = constrain(gray + (col.R - gray) * ampfactor, 0.0f, 255.0f);
+  uint8_t newG = constrain(gray + (col.G - gray) * ampfactor, 0.0f, 255.0f);
+  uint8_t newB = constrain(gray + (col.B - gray) * ampfactor, 0.0f, 255.0f);
+
+  // Return the new color with adjusted saturation
+  return Color(newR, newG, newB);
+}
 
 // Run once
 void WebExample::Setup() {
@@ -46,7 +67,7 @@ void WebExample::UIMenu() {
     buttons.emplace_back();  // Add a new UIButton to the vector
   }
 
-  for (size_t i = 0; i < colors.size(); ++i)
+  for (size_t i = 0; i < 64; ++i)
   {
     // Set the color function for the button
     buttons[i].SetColor(colors[i]);
@@ -56,6 +77,34 @@ void WebExample::UIMenu() {
       char json_data[64];
       sprintf(json_data, "{\"r\":%u,\"g\":%u,\"b\":%u}", color.R, color.G, color.B);
       send_post_request(json_data);
+    });
+
+    buttons[i].OnHold([this, color = colors[i]]() -> void {
+      UI shade_picker("Shade Picker", Color(0x00FFFF), true);
+
+      std::vector<UIButton> sat_buttons;
+      sat_buttons.reserve(64);
+      for (int j = 0; j < 64; ++j)
+      {
+        sat_buttons.emplace_back();
+      }
+
+      for (size_t j = 0; j < 64; ++j)
+      {
+        Color newcolor = new_saturation_by_factor(color, j);
+        sat_buttons[j].SetColor(newcolor);
+        sat_buttons[j].SetSize(Dimension(1, 1));
+        sat_buttons[j].OnPress([this, sat_color = newcolor, &shade_picker]() -> void {
+          char json_data[64];
+          sprintf(json_data, "{\"r\":%u,\"g\":%u,\"b\":%u}", sat_color.R, sat_color.G, sat_color.B);
+          send_post_request(json_data);
+          shade_picker.Exit();  // This now works because shade_picker is captured by reference
+        });
+
+        shade_picker.AddUIComponent(sat_buttons[j], Point(j / 8, j % 8));
+      }
+      MatrixOS::LED::Fade();
+      shade_picker.Start();
     });
 
     // Add the button to the menu at position (i / 8, i % 8)
