@@ -1,0 +1,45 @@
+# Home Assistant half of the Dec 2024 prototype, exported read-only 2026-10-12
+# from the main HA (192.168.1.55:8123). Entity: automation.matrix_webhook
+# (id 1733796841159), state "on", last triggered 2025-01-02.
+#
+# The board POSTs {"r":R,"g":G,"b":B} to /api/webhook/rgb_webhook and this sets
+# the Hue Go lamp to that colour. The two disabled actions are leftovers from
+# earlier payload experiments (input_number.matrix_colour, input_text.test).
+id: "1733796841159"
+alias: Matrix Webhook
+description: ""
+triggers:
+  - trigger: webhook
+    allowed_methods:
+      - POST
+      - PUT
+    local_only: true
+    webhook_id: rgb_webhook
+conditions: []
+actions:
+  - action: input_number.set_value
+    metadata: {}
+    data:
+      value: >-
+        {% set raw_data = trigger.data.keys() | list | first %}{% set parsed_data = raw_data | from_json %}{{ parsed_data.color | int }}
+    target:
+      entity_id: input_number.matrix_colour
+    enabled: false
+  - action: input_text.set_value
+    metadata: {}
+    data:
+      value: >-
+        {% set raw_data = trigger.data.keys() | list | first %}{% set parsed_data = raw_data | from_json %}{{ parsed_data.color | int }}
+    target:
+      entity_id: input_text.test
+    enabled: false
+  - action: light.turn_on
+    metadata: {}
+    target:
+      entity_id: light.hue_go
+    data:
+      rgb_color:
+        - "{{ trigger.json.r }}"
+        - "{{ trigger.json.g }}"
+        - "{{ trigger.json.b }}"
+mode: single
