@@ -48,3 +48,9 @@ log.txt
 # Local agent/copilot workflow artifacts
 .agent/
 /logs/
+
+# Local flash backups (Custom/README.md Phase 0); never commit
+Custom/backups/
+
+# Home Assistant controller credentials (template: HAConfig.example.h)
+Applications/HomeAssistant/HAConfig.local.h

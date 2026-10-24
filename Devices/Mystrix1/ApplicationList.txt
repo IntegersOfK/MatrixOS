@@ -24,6 +24,8 @@ MSC
 REDACTED
 
 # User Facing Apps
+# AJ: Home Assistant controller (ha-controller branch)
+HomeAssistant
 Performance
 Note
 Sequencer
