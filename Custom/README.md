@@ -1,6 +1,6 @@
 # Mystrix × Home Assistant: audit and plan
 
-Written 2026-10-12. This is the hand-over for the next session, which will have the board plugged into this PC.
+Written 2026-10-12, updated 2026-10-24. **To pick up the work, start at "Where things stand" below.**
 Branch `ha-controller` starts from vendor `upstream/main` @ `e1a4c080` (nightly-20260925, after V3.2.0).
 Vendor rules for working in this repo are in `/AGENT.md`; follow them.
 
@@ -10,16 +10,75 @@ Vendor rules for working in this repo are in `/AGENT.md`; follow them.
 - **The vendor has moved a long way** (2.6-dev → 3.2.0 + nightly; 1,100 commits; full restructure). It **still has no Wi‑Fi**: `Devices/Mystrix1/Drivers/WIFI.cpp` is a commented-out stub. Your prototype is still the only Wi‑Fi path, but it's a reference rather than a foundation.
 - **Recommendation: keep MatrixOS as the board-support layer and build one Home Assistant controller app on 3.x.** Make it boot straight into that app so the device *feels* like custom firmware. Don't go to ESPHome or bare ESP-IDF; see "Do we even need this OS?" below.
 
+## Where things stand (2026-10-24)
+
+Phases 0 and 1 are done. Phase 2 (the network layer) is written and flashed, but **not yet verified on the board**.
+
+**On the board now:** a dev build of vendor 4.0.0-dev, plus the `Home Assistant` app (a light-blue tile in the Shell). The app opens a network test page:
+
+| Key | What it does |
+|---|---|
+| (0,0) | Wi‑Fi status: green = connected, breathing amber = connecting, red = failed, grey = no config. Hold it to scroll the detail (e.g. the disconnect reason). |
+| (1,0) | `GET /api/`: green = 200, orange = HTTP error (401 = missing/bad token), pink = no answer. Hold it to scroll the result. |
+| 2×2 at (3,3) | `light/toggle` on `HA_TEST_ENTITY` (`light.hue_go`). The result flashes for 1.5 s. |
+
+That build has the 2024 Wi‑Fi credentials and **no HA token**. Expected result: green Wi‑Fi, an orange 401 on the API check, and a failed toggle.
+
+**Code** (`Applications/HomeAssistant/`):
+- `HANet.{h,cpp}`: the Wi‑Fi station plus a queued HTTP client.
+  - Wi‑Fi starts once, auto-reconnects (1–30 s backoff) and survives app exit.
+  - HTTP runs on its own task (`haNet`, 8 KB stack). The UI queues requests with a tag and polls for responses, so it never blocks.
+- `HomeAssistant.{h,cpp}`: the test page above.
+- `HAConfig.h` uses `HAConfig.local.h` (gitignored, real values) if it exists, otherwise `HAConfig.example.h` (committed, blank values).
+  - CMake sets `HA_LOCAL_CONFIG` when the local file exists, so creating that file forces a rebuild. `__has_include` didn't.
+  - The long-term plan is still NVS provisioning over USB.
+- Build wiring: `Devices/Mystrix1/ApplicationList.txt`, and `esp_http_client` in `Devices/Mystrix1/CMakeLists.txt`.
+- `Custom/tools/`: helper scripts (they need `pip install hidapi pyserial`).
+  - `mxquery.py`: read-only HID info queries.
+  - `uf2decode.py`: turns a UF2 into a bin and prints the app descriptor.
+  - `seriallog.py`: serial capture.
+  - `phase0-backup.ps1`: raw esptool dump, if one is ever needed.
+
+**Setting up another PC:**
+1. **ESP-IDF v5.3.4** in `C:\Espressif\frameworks\esp-idf-v5.3.4`. Run its `install.ps1` with `$env:IDF_TOOLS_PATH='C:\Espressif'`: `install.bat` failed from agent shells. Then run `git submodule update --init --recursive`.
+2. **Config:** copy `HAConfig.example.h` to `HAConfig.local.h` and fill it in. The Wi‑Fi values used so far are the 2024 ones: `git show legacy/ha-wifi-2024:applications/WebExample/WebExample.h` (`WEB_EXAMPLE_WIFI_SSID` / `_PASS`).
+3. **Build:** load the environment with `$env:IDF_TOOLS_PATH='C:\Espressif'; . C:\Espressif\frameworks\esp-idf-v5.3.4\export.ps1`. Then run `make DEVICE=Mystrix build-dev` and `make DEVICE=Mystrix uf2`, which gives `build/Mystrix/MatrixOS-Mystrix.uf2`.
+4. **Flash:** first get into UF2 mode, either way:
+   - hold FN at plug-in, or
+   - without unplugging: send HID report `[0xCB, 0x40, 0, …]` (64 bytes) on the collection `mxquery.py` finds.
+
+   Then copy the `.uf2` onto the `MATRIXDFU` drive. Don't use `idf.py flash`.
+
+**Open items, in order:**
+1. **HA token.** Create a dedicated long-lived token ("Mystrix") and put it in `HA_TOKEN`. Rebuild, flash, then check that the API key goes green and the Hue Go toggles. Then run through the Phase 2 acceptance checks below.
+2. **Downstairs light list.** AJ wants every "downstairs" light from HA (entity, friendly name, area, colour modes) so AJ can place them on the grid by name.
+   - It's a read-only query. REST has no area endpoint, so use `POST /api/template` with `floor_areas()` / `area_entities()`.
+   - Token: `homeassistant.token` in the claude-general SOPS vault (ask AJ for the vault path), or the new device token.
+3. **UI design (Phase 3): AJ is deciding.** The direction so far:
+   - The main view is a ground-floor plan with one key per light; press toggles it.
+   - Each light also needs colour, brightness and presets.
+   - Every light is colour-capable (none are white-only).
+   - AJ thinks this unit has no touch bar, so brightness has to live on the grid.
+   - Keeping the vendor OS (option A) is still the recommendation, but AJ wants to revisit it.
+4. **Serial logging is unverified.** A 30-minute capture on COM5 (`seriallog.py COM5 out.log 1800`) caught nothing. Either the app wasn't opened during it, or dev-build `MLOG` doesn't reach USB CDC. Check before relying on logs.
+
+**Only on the original PC, not in git:**
+- `HAConfig.local.h`
+- `Custom/backups/20261017-uf2/` (the `CURRENT.UF2` app backup)
+- `build/Mystrix-2024/` (the 2024 rollback UF2)
+
 ## Hardware
 
 | | |
 |---|---|
 | Product | **Mystrix** (vendor family `Devices/Mystrix1`). `Mystrix2` is a different, newer 2026 product (Pro/Ultra with a coprocessor) and isn't yours. |
-| Revision | Most likely **Rev C** (`REVC` config in `Devices/Mystrix1/Variants/Mystrix/RevC/Config.h`; "C2" is probably how it's printed). The model and revision are burned into eFuse and logged at boot (`Factory config - Mystrix <model> <rev>`). **Confirm in Phase 0.** |
+| Model | **Mystrix Standard, `MX1S`** (confirmed 2026-10-17 over the HID command API). Not the Pro: for an `S` model the firmware turns velocity (pressure) sensitivity **off** and drops the underglow partition, so keys act as on/off. Serial `8C6C219401D0A831369F3EEEC1C4B569`. |
+| Revision | Most likely **Rev C** (`REVC` config in `Devices/Mystrix1/Variants/Mystrix/RevC/Config.h`; "C2" is probably how it's printed). Still unconfirmed: the revision is only logged on the boot serial log (`Loading config for …`), not exposed over HID. |
 | MCU module | ESP32-S3-MINI-1 (FCC ID `2AC7Z-ESPS3MINI1`; 2AC7Z is Espressif's grantee code) |
 | Flash / RAM | 8 MB flash (the vendor partition table spans 0x800000) → the **-N8 variant, no PSRAM** (the vendor sdkconfig has no SPIRAM). That's about 512 KB SRAM shared by Wi‑Fi, BLE MIDI, the UI and (if used) MicroPython. Prefer plain HTTP on the LAN over TLS. |
-| I/O | 8×8 pressure-sensing (FSR) key grid scanned via ADC, FN key, 16-segment touch bar, WS2812 LEDs (GPIO38, 24-bit colour), microSD (4-bit SDMMC), native USB (TinyUSB: MIDI/HID/CDC/MSC), BLE MIDI |
-| Flashing | UF2 bootloader partition (`uf2` @ 0x7C0000); `MatrixOS::SYS::Bootloader()` reboots into it. Rollback image for the 2024 firmware: `build/Mystrix/MatrixOS-Mystrix.uf2` (Dec 15, 2024, ESP-IDF v5.3.2; untracked, local only, covered by the nightly backup) |
+| I/O | 8×8 FSR key grid scanned via ADC (binary on the `S` model), FN key, 16-segment touch bar (per the vendor config; AJ believes this unit has none), WS2812 LEDs (GPIO38, 24-bit colour), microSD (4-bit SDMMC), native USB (TinyUSB: MIDI/HID/CDC/MSC), BLE MIDI |
+| Flashing | UF2 bootloader partition (`uf2` @ 0x7C0000), "Matrix Bootloader V1.2-1-gb063d90" (Mar 27 2023). Enter it by holding FN while plugging in, from Settings, or with `MatrixOS::SYS::Bootloader()`. A UF2 copy rewrites only the app partition (bootloader, NVS and the UF2 loader are untouched), so FN-at-plug-in recovery always survives a bad app. No BOOT button: ROM download mode needs the 6-pin FLASH header (1 GND, 2 BOOT/IO0, 3 TX0, 4 RX0, 5 Reset, 6 VBUS; vendor schematic `203-Systems/Matrix-Block6-Hardware/PCB/Matrix.pdf` p.3), which is buried under the panel. The 5 pins visible near the bottom are the MATRIX MOD header (GND, TX1, ModGPIO, RX1, VBUS), not FLASH. |
+| Rollback (2024 firmware) | `Custom/backups/20261017-uf2/CURRENT.UF2` (read off the board) or `build/Mystrix-2024/MatrixOS-Mystrix.uf2`. They're byte-identical: `V2.5-22-g3b7d5ee-dirty`, built Dec 15 2024 17:27:33, IDF v5.3.2, app sha256 `1407b2d4…341d`. Both are gitignored and local only. |
 
 ## What you built in 2024
 
@@ -47,10 +106,10 @@ The fork's other branches (`CherryUSB`, `FE`, `For-Fun-nighty`, `HID_Improve`, `
 
 ## Vendor status (`upstream` = github.com/203-Systems/MatrixOS)
 
-- Fork base `9a062c4` (2024-12-09, 2.6-dev) → V3.0.0 (2025-11-07), V3.1.0, **V3.2.0 (2026-01-29)**, nightlies up to **2026-09-25** (this branch).
+- Fork base `9a062c4` (2024-12-09, 2.6-dev) → V3.0.0 (2025-11-07), V3.1.0, **V3.2.0 (2026-01-29)**, nightlies up to **2026-09-25** (this branch). Note that this nightly reports itself as **4.0.0** (`OS/System/Parameters.h`): it's 4.0-dev, not 3.x. See the wiki's "Migration from 3 to 4" page when the APIs differ from this doc.
 - Restructured: `Applications/ Devices/ OS/ Platform/ Library/`. Family `MatrixBlock6` → `Mystrix1`. Apps register via their own `CMakeLists.txt` (`RegisterApplicationClass(...)`) plus `Devices/Mystrix1/ApplicationList.txt`. `Setup(const vector<string>& args)`; `KeyEvent` → `InputEvent`; `UI::SetKeyEventHandler` → `SetInputEventHandler`.
 - **The UI API you used is unchanged:** `UI`, `UIButton::SetColor/SetColorFunc/SetSize/OnPress/OnHold`, `AddUIComponent`, `AllowExit`. `SetColorFunc` makes live state colours easy.
-- Needs **ESP-IDF v5.3.4** (this PC has v5.3.2 at `C:\Espressif\frameworks\esp-idf-v5.3.2-2`).
+- Needs **ESP-IDF v5.3.4**: installed 2026-10-17 at `C:\Espressif\frameworks\esp-idf-v5.3.4` (Python env `idf5.3_py3.13_env`). Load it with `$env:IDF_TOOLS_PATH='C:\Espressif'; . C:\Espressif\frameworks\esp-idf-v5.3.4\export.ps1`. v5.3.2 is still alongside.
 - New and relevant: a **MicroPython runtime** (Python apps = `AppInfo.json` + `main.py` **on the SD card**; the `MatrixOS` module exposes LED/Input/UI/NVS/MIDI/HID/Timer/FileSystem, **no networking**). Also: Shell launcher, **MystrixSim** (a host simulator, for testing UI without the board), BLE MIDI, Developer/Companion apps, ArduinoJson in `Library/`.
 - After boot the OS runs the boot animation, then the Shell. There's no "start this app" setting, but `OS/System/System.cpp:182` has a commented hook for exactly that.
 
@@ -103,17 +162,15 @@ Open decision for the next session: logic **on the device** (layout JSON contain
 
 ## Next session runbook (board plugged into this PC)
 
-**Phase 0: interrogate, read-only, back up first**
-1. Find the device: `Get-PnpDevice -PresentOnly | ? FriendlyName -match 'COM|Mystrix|Matrix|Espressif|USB Serial'`. MatrixOS enumerates as USB MIDI/HID/CDC.
-2. Open the USB CDC serial port and read the boot log. It confirms the model/revision string, the OS version, and that the 2024 build is what's installed.
-3. Get a raw ROM-bootloader connection (UF2 mode alone isn't enough for esptool; check https://matrix.203.io for the button combo, or the vendor's `Tools/`). Then:
-   - `esptool.py --chip esp32s3 flash_id` (confirms 8 MB)
-   - `espefuse.py --chip esp32s3 summary`, **read-only. Never run any `burn_*` command: eFuses are one-time.**
-   - `esptool.py --chip esp32s3 read_flash 0 0x800000 Custom/backups/mystrix-YYYYMMDD.bin`, a full image including NVS settings, for exact rollback. Gitignore `Custom/backups/`.
+**Phase 0: done 2026-10-17, using the UF2 path instead of a full raw dump (AJ's call).**
+- What happened: the board has no reachable BOOT button (see Hardware), so there was no esptool `read_flash`. Instead it was put in UF2 mode (FN at plug-in) and `CURRENT.UF2` (the app partition, 4 MiB from the app start) was copied to `Custom/backups/20261017-uf2/`. `Custom/tools/uf2decode.py` decodes it to `current-app.bin`, and it matched the 2024 build byte-for-byte.
+- Not backed up: NVS (settings and the old force calibration, which is moot on an `MX1S`), the bootloader and the partition table. A UF2 flash never writes those.
+- If a full raw dump is ever needed: bridge FLASH pin 2 to pin 1 at plug-in, then run `Custom/tools/phase0-backup.ps1` (read-only esptool/espefuse; **never `burn_*`**).
+- The installed firmware prints nothing on CDC while idle. Use `Custom/tools/mxquery.py` (raw HID report `0xCB`; on Windows only the second `0xFF00` collection accepts writes) for read-only OS version, model, serial and current app.
 
-**Phase 1: toolchain + stock vendor firmware.** Install ESP-IDF v5.3.4 next to v5.3.2. Run `git submodule update --init --recursive` (tinyusb, printf, cb0r, ArduinoJson, micropython). Build with `make DEVICE=Mystrix build-release`; the `Makefile` resolves `Mystrix` to `Devices/Mystrix1/Variants/Mystrix`, and `DEVICE=Mystrix1` also resolves via the family. Flash the stock 3.x and verify the grid, FN, touch bar, LEDs and saved settings. Exit criterion: stock 3.x runs on your board. Rollback: the Phase 0 image.
+**Phase 1: toolchain + stock vendor firmware.** Flashed 2026-10-17. ESP-IDF v5.3.4 is installed and the submodules are initialized. `make DEVICE=Mystrix build-release` then `make DEVICE=Mystrix uf2` built the stock 4.0.0-dev firmware (app 0x2a9b80 bytes, 28% of the partition free, UF2 sha256 `9fa375bc…e1da`), which was copied onto the `MATRIXDFU` drive. The board came back as `Mystrix` / `MX1S`, OS 4.0.0, running the Shell. AJ checked it by hand: all keys, FN and the LEDs work; AJ believes this unit has no touch bar. Rollback: hold FN at plug-in, then copy `build/Mystrix-2024/MatrixOS-Mystrix.uf2` onto the drive.
 
-**Phase 2: port the prototype properly.** Create `Applications/HomeAssistant` with the network service above and NVS provisioning; reproduce "press a colour → Hue Go changes" through `light.turn_on` (REST). Acceptance:
+**Phase 2: port the prototype properly. In progress:** the network layer and test page are written and flashed but not yet verified (see "Where things stand"). Config is a gitignored header for now; NVS provisioning comes later. Create `Applications/HomeAssistant` with the network service above; reproduce "press a colour → Hue Go changes" through `light.turn_on` (REST). Acceptance:
 - Hue Go follows the grid
 - launching the app 5× in a row doesn't reboot
 - HA unreachable → no UI freeze, error colour shown
