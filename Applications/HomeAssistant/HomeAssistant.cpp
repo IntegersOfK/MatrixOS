@@ -1,9 +1,12 @@
 #include "HomeAssistant.h"
 #include "HAConfig.h"
 #include "HANet.h"
+#include "PanicCapture.h"
 #include "UI/UI.h"
 
 #include "esp_err.h"
+#include "esp_heap_caps.h"
+#include "esp_system.h"
 
 static const char* TAG = "HomeAssistant";
 
@@ -16,8 +19,35 @@ static const Color COLOR_HTTP_ERROR = Color(0xFF3000);    // HA answered with an
 static const Color COLOR_NETWORK_ERROR = Color(0xFF00A0); // No answer at all (Wi-Fi down, host unreachable, timeout)
 static const Color COLOR_CONNECTING = Color(0xFFA000);
 
+// Diagnostic: the panic handler prints to UART0, which isn't wired out, and the flash core dump never lands,
+// so print the panic PanicCapture kept in RTC memory over the USB log.
+// Decode the PCs with xtensa-esp32s3-elf-addr2line -pfiaC -e build/Mystrix/MatrixOS-Mystrix.elf <pc> ...
+static void LogLastCrash() {
+  MLOGI(TAG, "Reset reason %d, free heap %lu, internal min free %lu", (int)esp_reset_reason(), (unsigned long)esp_get_free_heap_size(),
+        (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+  PanicCapture::Record panic;
+  if (PanicCapture::Take(&panic))
+  {
+    MLOGE(TAG, "Last panic: %s, core %d, PC 0x%08lx, cause %lu, vaddr 0x%08lx", panic.reason, panic.core, (unsigned long)panic.pc,
+          (unsigned long)panic.excCause, (unsigned long)panic.excVaddr);
+    if (panic.abortDetails[0] != '\0')
+    {
+      MLOGE(TAG, "Abort: %s", panic.abortDetails);
+    }
+    string backtrace;
+    for (uint32_t i = 0; i < panic.depth; i++)
+    {
+      char pc[12];
+      snprintf(pc, sizeof(pc), "0x%08lx ", (unsigned long)panic.backtrace[i]);
+      backtrace += pc;
+    }
+    MLOGE(TAG, "Panic backtrace: %s", backtrace.c_str());
+  }
+}
+
 void HomeAssistant::Setup(const vector<string>& args) {
   (void)args;
+  LogLastCrash();
   HANet::Begin();
 
   // Responses left over from a previous launch belong to probes that no longer exist

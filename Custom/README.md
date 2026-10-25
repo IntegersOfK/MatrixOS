@@ -12,7 +12,7 @@ Vendor rules for working in this repo are in `/AGENT.md`; follow them.
 
 ## Where things stand (2026-10-24)
 
-Phases 0 and 1 are done. Phase 2 (the network layer) is written and flashed, but **not yet verified on the board**.
+Phases 0 and 1 are done. Phase 2's network layer is **verified on the board** (2026-10-24, on the second laptop): Wi‑Fi connects, `GET /api/` returns 200 with the device token, and the centre button toggles the Hue Go.
 
 **On the board now:** a dev build of vendor 4.0.0-dev, plus the `Home Assistant` app (a light-blue tile in the Shell). The app opens a network test page:
 
@@ -22,17 +22,23 @@ Phases 0 and 1 are done. Phase 2 (the network layer) is written and flashed, but
 | (1,0) | `GET /api/`: green = 200, orange = HTTP error (401 = missing/bad token), pink = no answer. Hold it to scroll the result. |
 | 2×2 at (3,3) | `light/toggle` on `HA_TEST_ENTITY` (`light.hue_go`). The result flashes for 1.5 s. |
 
-That build has the 2024 Wi‑Fi credentials and **no HA token**. Expected result: green Wi‑Fi, an orange 401 on the API check, and a failed toggle.
+The build on the board has the 2024 Wi‑Fi credentials (SSID `AAA`: the ESP32-S3 is 2.4 GHz only, so not `AAA-5G`) and the dedicated "Mystrix" HA token.
+
+**The crash that blocked Phase 2, now fixed:** opening the app rebooted the board as soon as Wi‑Fi started connecting. The cause was `***ERROR*** A stack overflow in task sys_evt`. Dev builds compile everything at `-O0` (`CONFIG_COMPILER_OPTIMIZATION_NONE`), including ESP-IDF's own esp_netif/Wi‑Fi event handlers, and the 2304-byte default `sys_evt` stack is too small for that. The fix is `CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096` in `Devices/Mystrix1/sdkconfig.development`; release builds (`-O2`) are untouched. `HANet`'s Wi‑Fi event handler also no longer calls `MLOG`, which is heavy (std::string building + vprintf + CDC printf). The 2024 prototype's reboots may well have had the same cause.
+- Changing an `sdkconfig.*` defaults file doesn't update an existing `build/Mystrix/sdkconfig`. Edit that too, or delete it to regenerate (full rebuild).
 
 **Code** (`Applications/HomeAssistant/`):
 - `HANet.{h,cpp}`: the Wi‑Fi station plus a queued HTTP client.
   - Wi‑Fi starts once, auto-reconnects (1–30 s backoff) and survives app exit.
   - HTTP runs on its own task (`haNet`, 8 KB stack). The UI queues requests with a tag and polls for responses, so it never blocks.
-- `HomeAssistant.{h,cpp}`: the test page above.
+- `HomeAssistant.{h,cpp}`: the test page above. On launch it logs the reset reason, free heap and the last panic, if any.
+- `PanicCapture.{h,cpp}`: a diagnostic. It wraps `esp_panic_handler` (`-Wl,--wrap`) and keeps the panic reason, abort message and backtrace in RTC memory across the reboot.
+  - It exists because the panic handler prints to UART0 (on the buried FLASH header), and the flash core dump never lands (`esp_core_dump_image_check` always fails after a panic).
+  - To read a crash: reproduce it, open the app once more, read the USB log, then decode the PCs with `xtensa-esp32s3-elf-addr2line -pfiaC -e build/Mystrix/MatrixOS-Mystrix.elf <pc>…`.
 - `HAConfig.h` uses `HAConfig.local.h` (gitignored, real values) if it exists, otherwise `HAConfig.example.h` (committed, blank values).
   - CMake sets `HA_LOCAL_CONFIG` when the local file exists, so creating that file forces a rebuild. `__has_include` didn't.
   - The long-term plan is still NVS provisioning over USB.
-- Build wiring: `Devices/Mystrix1/ApplicationList.txt`, and `esp_http_client` in `Devices/Mystrix1/CMakeLists.txt`.
+- Build wiring: `Devices/Mystrix1/ApplicationList.txt`, `esp_http_client` in `Devices/Mystrix1/CMakeLists.txt`, and the `sys_evt` stack in `Devices/Mystrix1/sdkconfig.development`.
 - `Custom/tools/`: helper scripts (they need `pip install hidapi pyserial`).
   - `mxquery.py`: read-only HID info queries.
   - `uf2decode.py`: turns a UF2 into a bin and prints the app descriptor.
@@ -41,6 +47,7 @@ That build has the 2024 Wi‑Fi credentials and **no HA token**. Expected result
 
 **Setting up another PC:**
 1. **ESP-IDF v5.3.4** in `C:\Espressif\frameworks\esp-idf-v5.3.4`. Run its `install.ps1` with `$env:IDF_TOOLS_PATH='C:\Espressif'`: `install.bat` failed from agent shells. Then run `git submodule update --init --recursive`.
+   You also need **GNU Make**: `winget install ezwinports.make`. Its `make.exe` lands in `%LOCALAPPDATA%\Microsoft\WinGet\Packages\ezwinports.make_*\bin`; add that to `PATH` if a new shell still can't find `make`.
 2. **Config:** copy `HAConfig.example.h` to `HAConfig.local.h` and fill it in. The Wi‑Fi values used so far are the 2024 ones: `git show legacy/ha-wifi-2024:applications/WebExample/WebExample.h` (`WEB_EXAMPLE_WIFI_SSID` / `_PASS`).
 3. **Build:** load the environment with `$env:IDF_TOOLS_PATH='C:\Espressif'; . C:\Espressif\frameworks\esp-idf-v5.3.4\export.ps1`. Then run `make DEVICE=Mystrix build-dev` and `make DEVICE=Mystrix uf2`, which gives `build/Mystrix/MatrixOS-Mystrix.uf2`.
 4. **Flash:** first get into UF2 mode, either way:
@@ -50,20 +57,19 @@ That build has the 2024 Wi‑Fi credentials and **no HA token**. Expected result
    Then copy the `.uf2` onto the `MATRIXDFU` drive. Don't use `idf.py flash`.
 
 **Open items, in order:**
-1. **HA token.** Create a dedicated long-lived token ("Mystrix") and put it in `HA_TOKEN`. Rebuild, flash, then check that the API key goes green and the Hue Go toggles. Then run through the Phase 2 acceptance checks below.
-2. **Downstairs light list.** AJ wants every "downstairs" light from HA (entity, friendly name, area, colour modes) so AJ can place them on the grid by name.
-   - It's a read-only query. REST has no area endpoint, so use `POST /api/template` with `floor_areas()` / `area_entities()`.
-   - Token: `homeassistant.token` in the claude-general SOPS vault (ask AJ for the vault path), or the new device token.
+1. **Phase 2 acceptance checks** (below): the basic toggle works; run through the rest.
+2. **Downstairs layout: waiting on AJ.** The light list has been pulled and given to AJ. HA has no "downstairs" floor (the floors are Upstairs, Ground Floor and Basement); "downstairs" means the Hue group `light.downstairs` (29 lights: Living Room A1–B4, Kitchen D2–D6/E2–E3 plus strips, Dining, Front Door, Powder Room, E1 and the Festavia string). AJ still has to confirm the scope (include Backyard, GLORB or the Basement?) and place the lights on the 8×8 grid.
+   - Query: `POST /api/template` with `floors()`, `floor_areas()`, `area_name()`, `floor_name()` over `states.light`. The device token works for it.
+   - Not every light is colour-capable: `light.tube_lights_*_basement`, `light.doorbell_button`, `light.red_alarm` and the Ensuite overhead switch are on/off only, and GLORB (`light.wled`) is RGB only.
 3. **UI design (Phase 3): AJ is deciding.** The direction so far:
    - The main view is a ground-floor plan with one key per light; press toggles it.
    - Each light also needs colour, brightness and presets.
-   - Every light is colour-capable (none are white-only).
    - AJ thinks this unit has no touch bar, so brightness has to live on the grid.
    - Keeping the vendor OS (option A) is still the recommendation, but AJ wants to revisit it.
-4. **Serial logging is unverified.** A 30-minute capture on COM5 (`seriallog.py COM5 out.log 1800`) caught nothing. Either the app wasn't opened during it, or dev-build `MLOG` doesn't reach USB CDC. Check before relying on logs.
+4. **Serial logging works.** Dev-build `MLOG` reaches USB CDC (it was COM6 on the second laptop). It starts a few seconds into boot, so the earliest boot lines (e.g. `Loading config for …`) are missed.
 
-**Only on the original PC, not in git:**
-- `HAConfig.local.h`
+**Only on a dev PC, not in git:**
+- `HAConfig.local.h` (on both laptops now)
 - `Custom/backups/20261017-uf2/` (the `CURRENT.UF2` app backup)
 - `build/Mystrix-2024/` (the 2024 rollback UF2)
 

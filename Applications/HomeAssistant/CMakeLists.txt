@@ -21,7 +21,11 @@ target_link_libraries(HomeAssistantAPP PUBLIC
     idf::esp_netif
     idf::esp_event
     idf::esp_http_client
+    idf::esp_system
 )
+
+# Diagnostic: PanicCapture.cpp keeps the last panic in RTC memory
+target_link_options(HomeAssistantAPP INTERFACE "-Wl,--wrap=esp_panic_handler")
 
 # Register the application class
 RegisterApplicationClass(HomeAssistant)

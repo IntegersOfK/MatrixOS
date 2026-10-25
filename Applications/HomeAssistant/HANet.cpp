@@ -80,6 +80,8 @@ static void ReconnectTimerCallback(TimerHandle_t timer) {
   esp_wifi_connect();
 }
 
+// Runs on the shared sys_evt task, whose stack is only 2304 bytes: MLOG overflows it, so keep this to state updates.
+// The test page shows the link state and the last disconnect reason instead.
 static void WifiEventHandler(void* arg, esp_event_base_t base, int32_t id, void* data) {
   (void)arg;
   if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START)
@@ -92,18 +94,15 @@ static void WifiEventHandler(void* arg, esp_event_base_t base, int32_t id, void*
     lastDisconnectReason = event->reason;
     linkState = LinkState::Connecting;
     xEventGroupClearBits(linkEvents, CONNECTED_BIT);
-    MLOGW(TAG, "Wi-Fi disconnected (reason %d), retry in %lu ms", event->reason, (unsigned long)reconnectDelayMs);
     // Backoff on a timer: blocking here would stall the shared default event loop
     xTimerChangePeriod(reconnectTimer, pdMS_TO_TICKS(reconnectDelayMs), 0);
     reconnectDelayMs = std::min<uint32_t>(reconnectDelayMs * 2, RECONNECT_MAX_MS);
   }
   else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP)
   {
-    ip_event_got_ip_t* event = (ip_event_got_ip_t*)data;
     reconnectDelayMs = RECONNECT_MIN_MS;
     linkState = LinkState::Connected;
     xEventGroupSetBits(linkEvents, CONNECTED_BIT);
-    MLOGI(TAG, "Connected, IP " IPSTR ", free heap %lu", IP2STR(&event->ip_info.ip), (unsigned long)esp_get_free_heap_size());
   }
 }
 
